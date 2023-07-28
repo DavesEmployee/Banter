@@ -19,10 +19,12 @@ public class OpenAIController : MonoBehaviour
 
     private OpenAIAPI api;
     private List<ChatMessage> messages;
+    private OpenAIConfigurator aiConfig;
     
     // Start is called before the first frame update
     void Start()
     {
+        aiConfig = GetComponent<OpenAIConfigurator>();
         api = new OpenAIAPI(Environment.GetEnvironmentVariable("OPENAI_API_KEY", EnvironmentVariableTarget.User));
         StartConversation();
         okButton.onClick.AddListener(() => GetResponse());
@@ -31,7 +33,7 @@ public class OpenAIController : MonoBehaviour
     private void StartConversation()
     {
         messages = new List<ChatMessage> {
-            new ChatMessage(ChatMessageRole.System, "You are an honorable gruff squid who holds a terrible secret. You will only allow someone you like to hear it. You exist on land and are a farmer")
+            new ChatMessage(ChatMessageRole.System, "You are a squid who holds a terrible secret. You will only allow someone you like to hear it. You exist on land and your profession is a farmer.")
         };
 
         inputField.text = "";
@@ -65,7 +67,7 @@ public class OpenAIController : MonoBehaviour
         messages.Add(userMessage);
 
         // Update the text field with the user message
-        textField.text = string.Format("You: {0}", userMessage);
+        textField.text = string.Format("You: {0}", userMessage.Content);
 
         // Clear the input field
         inputField.text = "";
@@ -74,10 +76,13 @@ public class OpenAIController : MonoBehaviour
         var chatResult = await api.Chat.CreateChatCompletionAsync(new ChatRequest()
         {
             Model = Model.ChatGPTTurbo,
-            Temperature = 0.1,
-            MaxTokens = 50,
+            Temperature = aiConfig.temperature,
+            MaxTokens = aiConfig.maxTokens,
             Messages = messages
         });
+
+        // // Get the response message
+        // string responseText = chatResult.Choices[0].Message.Content;
 
         // Get the response message
         ChatMessage responseMessage = new ChatMessage();
