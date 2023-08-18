@@ -6,6 +6,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System;
 using System.IO;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 // using Environment;
 
@@ -15,11 +17,19 @@ using UnityEngine.UI;
 [System.Serializable]
 public class CharacterData
 {
+    [JsonProperty("name")]
     public string Name;
+    
+    [JsonProperty("profession")]
     public string Profession;
+    
+    [JsonProperty("background")]
     public string Background;
-    // public string[] Personality;
+    
+    [JsonProperty("attitude")]
     public int Attitude;
+    
+    [JsonProperty("health")]
     public int Health;
 }
 
@@ -33,12 +43,25 @@ public class CharacterData
 //     "Health": 20
 // }
 
+[System.Serializable]
+public class CharacterDataJson
+{
+    public string name;
+    public string profession;
+    public string background;
+    public int attitude;
+    public int health;
+}
+
 
 public class OpenAIController : MonoBehaviour
 {
     public TMP_Text textField;
-    public TMP_InputField inputField;
-    public Button okButton;
+    // public TMP_InputField inputField;
+    // public Button okButton;
+    public Button topButton;
+    public Button middleButton;
+    public Button bottomButton;
 
     private OpenAIAPI api;
     private List<ChatMessage> messages;
@@ -51,15 +74,52 @@ public class OpenAIController : MonoBehaviour
     {
         aiConfig = GetComponent<OpenAIConfigurator>();
         api = new OpenAIAPI(Environment.GetEnvironmentVariable("OPENAI_API_KEY", EnvironmentVariableTarget.User));
+
         // Load the JSON data from the file
         string filePath = Application.dataPath + "/data.json"; // Adjust the path as needed
-        string jsonContent = File.ReadAllText(filePath);
-        
-        // Deserialize the JSON data into a CharacterData object
-        characterData = JsonUtility.FromJson<CharacterData>(jsonContent);
+
+        if (File.Exists(filePath)) // Check if the file exists
+        {
+            string jsonContent = File.ReadAllText(filePath);
+
+            // Deserialize the JSON data into a CharacterDataJson object
+            CharacterDataJson dataJson = JsonUtility.FromJson<CharacterDataJson>(jsonContent);
+
+            if (dataJson != null)
+            {
+                characterData = new CharacterData
+                {
+                    Name = dataJson.name,
+                    Profession = dataJson.profession,
+                    Background = dataJson.background,
+                    Attitude = dataJson.attitude,
+                    Health = dataJson.health
+                };
+
+                Debug.Log("Character data loaded successfully.");
+                Debug.Log("Name: " + characterData.Name);
+                Debug.Log("Profession: " + characterData.Profession);
+                Debug.Log("Attitude: " + characterData.Attitude);
+            }
+            else
+            {
+                Debug.LogError("Failed to deserialize character data from JSON.");
+            }
+        }
+        else
+        {
+            Debug.LogError("Data file does not exist at: " + filePath);
+        }
+
         StartConversation();
-        okButton.onClick.AddListener(() => GetResponse());
+        topButton.onClick.AddListener(() => GetResponse(topButton.GetComponentInChildren<TMP_Text>().text));
+        middleButton.onClick.AddListener(() => GetResponse(middleButton.GetComponentInChildren<TMP_Text>().text));
+        bottomButton.onClick.AddListener(() => GetResponse(bottomButton.GetComponentInChildren<TMP_Text>().text));
     }
+
+
+
+
 
     private void StartConversation()
     {
@@ -71,7 +131,7 @@ public class OpenAIController : MonoBehaviour
         // CharacterData characterData = JsonUtility.FromJson<CharacterData>(jsonContent);
 
         messages = new List<ChatMessage> {
-            new ChatMessage(ChatMessageRole.System, "I want you to take on the role of a character in an RPG videogame. Your attitude towards the player ranges from 1-10 (lowest-highest). You store your character information in JSON format including your name, profession, attitude, and established background. You will update your character data in JSON at the start of every message in a code block, then the chat response. ALWAYS include a chat response. You are free to engage in combat type scenarios. Please take on this persona now from the current JSON.")
+            new ChatMessage(ChatMessageRole.System, "I want you to take on the role of a character in an RPG videogame. Your attitude towards the player ranges from 1-10 (lowest-highest). You store your character information in JSON format including your name, profession, attitude, and established background. You will update your character data in JSON at the start of every message in a code block, then the chat response. ALWAYS include a chat response. You are free to engage in combat type scenarios. Do not start responses with your name. Your responses should be in single paragraph form, no more than two sentences. Please take on this persona now from the current JSON.")
         };
         messages.Add(new ChatMessage(ChatMessageRole.System, $"Name: {characterData.Name}"));
         messages.Add(new ChatMessage(ChatMessageRole.System, $"Profession: {characterData.Profession}"));
@@ -87,26 +147,103 @@ public class OpenAIController : MonoBehaviour
         //         messages.Add(new ChatMessage(ChatMessageRole.System, $"- {trait}"));
         //     }
         // }
-        inputField.text = "";
+        // inputField.text = "";
         string startString = "You have just approached a funny looking farmer.";
         textField.text = startString;
         Debug.Log(startString);
     }
 
-    private async void GetResponse()
+
+    private async Task<List<string>> GetAIResponses(string inputMessage)
     {
-        if (inputField.text.Length < 1)
+        messages = new List<ChatMessage> {
+            new ChatMessage(ChatMessageRole.System, "Please generate a dialogue response for this conversation. You are free to speak however a typical player would want to. Keep your responses to a single sentence. Do not start responses with 'Player:' or anything similar. Return only the response.")
+        };
+        messages.Add(new ChatMessage(ChatMessageRole.User, inputMessage));
+
+        var chatResult = await api.Chat.CreateChatCompletionAsync(new ChatRequest()
         {
-            return;
+            Model = Model.ChatGPTTurbo,
+            Temperature = aiConfig.temperature,
+            // MaxTokens = aiConfig.maxTokens,
+            // MaxTokens = 24
+            NumChoicesPerMessage = 3,
+            Messages = messages
+        });
+
+        // Debug.Log(chatResult);
+
+        // Extract responses from chatResult and return them
+        List<string> responses = new List<string>();
+        foreach (var choice in chatResult.Choices)
+        {
+            responses.Add(choice.Message.Content);
         }
+        return responses;
+    }
+
+    private void ParseAndLoadCharacterData(string json)
+    {
+        CharacterDataJson dataJson = JsonUtility.FromJson<CharacterDataJson>(json);
+
+        if (dataJson != null)
+        {
+            characterData = new CharacterData
+            {
+                Name = dataJson.name,
+                Profession = dataJson.profession,
+                Background = dataJson.background,
+                Attitude = dataJson.attitude,
+                Health = dataJson.health
+            };
+        }
+    }
+
+
+    private void SaveCharacterDataToJson()
+    {
+        CharacterDataJson dataJson = new CharacterDataJson
+        {
+            name = characterData.Name,
+            profession = characterData.Profession,
+            background = characterData.Background,
+            attitude = characterData.Attitude,
+            health = characterData.Health
+        };
+
+        // Log the dataJson object to see its contents before serialization
+        Debug.Log("dataJson contents:\n" + JsonUtility.ToJson(dataJson));
+
+        string json = JsonUtility.ToJson(dataJson);
+        string filePath = Application.dataPath + "/data.json";
+
+        File.WriteAllText(filePath, json);
+
+        Debug.Log("Character data saved to data.json");
+    }
+
+
+
+
+
+    private async void GetResponse(string inputButton)
+    {
+        // if (inputField.text.Length < 1)
+        // {
+        //     return;
+        // }
 
         // Disable the OK Button
-        okButton.enabled = false;
+        // okButton.enabled = false;
+        topButton.enabled = false;
+        middleButton.enabled = false;
+        bottomButton.enabled = false;
 
         // Fill the user message from the input field
         ChatMessage userMessage = new ChatMessage();
         userMessage.Role = ChatMessageRole.User;
-        userMessage.Content = inputField.text;
+        // userMessage.Content = inputField.text;
+        userMessage.Content = inputButton;
         // if (userMessage.Content.Length > 100)
         // {
         //     // Limit messages to 100 characters
@@ -121,7 +258,7 @@ public class OpenAIController : MonoBehaviour
         textField.text = string.Format("You: {0}", userMessage.Content);
 
         // Clear the input field
-        inputField.text = "";
+        // inputField.text = "";
 
         // Send the entire chat to OpenAI to get the next message
         var chatResult = await api.Chat.CreateChatCompletionAsync(new ChatRequest()
@@ -148,7 +285,13 @@ public class OpenAIController : MonoBehaviour
             Debug.Log("JSON Response:\n" + jsonPart);
             
             // Parse the JSON and perform any necessary actions
-            characterData = JsonUtility.FromJson<CharacterData>(jsonPart);
+            // characterData = JsonUtility.FromJson<CharacterData>(jsonPart);
+            string loadfilePath = Application.dataPath + "/data.json";
+            if (File.Exists(loadfilePath))
+            {
+                string jsonContent = File.ReadAllText(loadfilePath);
+                ParseAndLoadCharacterData(jsonContent);
+            }
 
             Debug.Log("Name: " + characterData.Name);
             Debug.Log("Profession: " + characterData.Profession);
@@ -205,18 +348,39 @@ public class OpenAIController : MonoBehaviour
         {
             Debug.LogError("The file is currently locked and cannot be written.");
         }
-        else
+        if (!string.IsNullOrEmpty(chatResponse)) // Check if chatResponse is not empty
         {
-            // Proceed with writing to the file
             // Serialize characterData back to JSON format
             string updatedJsonData = JsonUtility.ToJson(characterData);
 
-            // Write the updated JSON back to the file
+            // Log the character data before saving to file
+            Debug.Log("Character data to be saved:");
+            Debug.Log(updatedJsonData);
+
+            // // Write the updated JSON back to the file
             File.WriteAllText(filePath, updatedJsonData);
 
             Debug.Log("JSON data successfully written to file.");
+            // Call this after updating characterData
+            SaveCharacterDataToJson();
         }
 
+        // In your GetResponse method after updating the JSON and writing to file
+        var aiResponses = await GetAIResponses(responseMessage.Content);
+
+        if (aiResponses.Count >= 3)
+        {
+            topButton.GetComponentInChildren<TMP_Text>().text = aiResponses[0];
+            middleButton.GetComponentInChildren<TMP_Text>().text = aiResponses[1];
+            bottomButton.GetComponentInChildren<TMP_Text>().text = aiResponses[2];
+        }
+
+        // Now aiResponses contains a list of responses from OpenAI
+        foreach (var response in aiResponses)
+        {
+            // Process and use the responses as needed
+            Debug.Log("AI Response: " + response);
+        }
 
         // Add the response to the list of messages
         messages.Add(responseMessage);
@@ -225,7 +389,10 @@ public class OpenAIController : MonoBehaviour
         textField.text = string.Format("You: {0}\n\n{1}: {2}", userMessage.Content, characterData.Name, responseMessage.Content);
 
         // Re-enable the OK button
-        okButton.enabled = true;
+        // okButton.enabled = true;
+        topButton.enabled = true;
+        middleButton.enabled = true;
+        bottomButton.enabled = true;
 
 
     }
